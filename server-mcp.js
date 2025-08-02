@@ -2,14 +2,13 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import fetch from 'node-fetch';
 import FormData from 'form-data';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 8000;
-// const SERVER_BASE_URL = process.env.SERVER_BASE_URL || 'http://10.0.1.35:3000';
+const SERVER_BASE_URL = 'http://10.0.1.35:3000';
 
 if (!SERVER_BASE_URL) {
   console.error('BASE_URL is not set in environment variables.');
