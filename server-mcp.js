@@ -187,7 +187,7 @@ app.post('/mcp', async (req, res) => {
               formData.append('skipScraping', 'true'); // Indicates this is from MCP, not extension
               
               // Make request to aiarchives API (running on same instance)
-              const apiResponse = await fetch('http://localhost:3000/api/conversation', {
+              const apiResponse = await fetch('http://ip-10-0-1-35.us-east-2.compute.internal:3000/api/conversation', {
                 method: 'POST',
                 body: formData,
               });
