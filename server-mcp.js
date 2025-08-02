@@ -1,199 +1,157 @@
 import express from 'express';
 import bodyParser from 'body-parser';
 import cors from 'cors';
+import dotenv from 'dotenv';
+import fetch from 'node-fetch';
+import FormData from 'form-data';
+
+dotenv.config();
 
 const app = express();
-const PORT = 8000;
+const PORT = process.env.PORT || 8000;
+const SERVER_BASE_URL = process.env.BASE_URL;
 
-// Middleware
+if (!SERVER_BASE_URL) {
+  console.error('BASE_URL is not set in environment variables.');
+  process.exit(1);
+}
+
 app.use(cors());
 app.use(bodyParser.json());
 
-// Root MCP endpoint - this is what mcp-remote expects
-app.post('/mcp', (req, res) => {
+app.post('/mcp', async (req, res) => {
   console.log('Received MCP request:', JSON.stringify(req.body, null, 2));
 
   const { method, params, id, jsonrpc } = req.body;
 
   try {
-    // Handle notifications (no response needed) - notifications don't have an id
+    // Handle notifications (no response)
     if (id === undefined && method) {
-      console.log(`Handling notification: ${method}`);
-      switch (method) {
-        case 'notifications/initialized':
-          console.log('Client initialized');
-          break;
-        case 'notifications/cancelled':
-          console.log('Request cancelled');
-          break;
-        default:
-          console.log(`Unknown notification: ${method}`);
-      }
-      // For notifications, we must not send any response
-      res.status(204).end(); // 204 No Content
-      return;
+      console.log(`Notification received: ${method}`);
+      return res.status(204).end();
     }
 
-    // Validate that we have required fields for method calls
+    // Validate JSON-RPC
     if (!jsonrpc || !method || id === undefined) {
-      res.status(400).json({
+      return res.status(400).json({
         jsonrpc: '2.0',
         id: id || null,
-        error: {
-          code: -32600,
-          message: 'Invalid Request - missing required fields',
-        },
+        error: { code: -32600, message: 'Invalid Request - missing required fields' },
       });
-      return;
     }
 
-    // Handle regular method calls (these have an id)
     switch (method) {
       case 'initialize':
-        res.json({
+        return res.json({
           jsonrpc: '2.0',
-          id: id,
+          id,
           result: {
             protocolVersion: '2025-06-18',
-            capabilities: {
-              tools: {},
-            },
-            serverInfo: {
-              name: 'Remote MCP Server',
-              version: '0.1.0',
-            },
+            capabilities: { tools: {} },
+            serverInfo: { name: 'Remote MCP Server', version: '1.0.0' },
           },
         });
-        break;
 
       case 'tools/list':
-        res.json({
+        return res.json({
           jsonrpc: '2.0',
-          id: id,
+          id,
           result: {
             tools: [
               {
-                name: 'add',
-                description: 'Return the sum of a and b',
+                name: 'save_conversation',
+                description:
+                  'Saves entire LLM conversation to aiarchives.duckdns.org and returns a shareable URL. Provide full conversation text.',
                 inputSchema: {
                   type: 'object',
                   properties: {
-                    a: { type: 'number' },
-                    b: { type: 'number' },
+                    conversation: { type: 'string', description: 'Full conversation as text or HTML' },
                   },
-                  required: ['a', 'b'],
-                },
-              },
-              {
-                name: 'reverse',
-                description: 'Return the input text reversed',
-                inputSchema: {
-                  type: 'object',
-                  properties: {
-                    text: { type: 'string' },
-                  },
-                  required: ['text'],
+                  required: ['conversation'],
                 },
               },
             ],
           },
         });
-        break;
 
       case 'tools/call':
-        if (!params || !params.name) {
-          res.status(400).json({
+        if (!params || !params.name || !params.arguments) {
+          return res.json({
             jsonrpc: '2.0',
-            id: id,
-            error: {
-              code: -32602,
-              message: 'Invalid params - missing tool name',
-            },
+            id,
+            error: { code: -32602, message: 'Invalid params - missing tool name or arguments' },
           });
-          return;
         }
 
-        const { name, arguments: args } = params;
-        let result;
+        const toolName = params.name;
+        const toolArgs = params.arguments;
 
-        switch (name) {
-          case 'add':
-            if (typeof args.a !== 'number' || typeof args.b !== 'number') {
-              res.status(400).json({
-                jsonrpc: '2.0',
-                id: id,
-                error: {
-                  code: -32602,
-                  message: 'Invalid params - a and b must be numbers',
-                },
-              });
-              return;
+        const TOOLS = {
+          save_conversation: async (args) => {
+            if (!args.conversation || typeof args.conversation !== 'string') {
+              throw new Error('`conversation` must be a string');
             }
-            result = {
-              content: [{ type: 'text', text: `Result: ${args.a + args.b}` }],
-            };
-            break;
 
-          case 'reverse':
-            if (typeof args.text !== 'string') {
-              res.status(400).json({
-                jsonrpc: '2.0',
-                id: id,
-                error: {
-                  code: -32602,
-                  message: 'Invalid params - text must be a string',
-                },
-              });
-              return;
-            }
-            result = {
-              content: [{ type: 'text', text: `Result: ${args.text.split('').reverse().join('')}` }],
-            };
-            break;
-
-          default:
-            res.status(400).json({
-              jsonrpc: '2.0',
-              id: id,
-              error: {
-                code: -32601,
-                message: `Unknown tool: ${name}`,
-              },
+            const formData = new FormData();
+            formData.append('htmlDoc', Buffer.from(args.conversation, 'utf-8'), {
+              filename: 'conversation.txt',
+              contentType: 'text/plain',
             });
-            return;
-        }
+            formData.append('model', 'Claude (MCP)');
+            formData.append('skipScraping', '');
 
-        res.json({
-          jsonrpc: '2.0',
-          id: id,
-          result: result,
-        });
-        break;
+            const response = await fetch(`${SERVER_BASE_URL}/api/conversation`, {
+              method: 'POST',
+              body: formData,
+            });
+
+            if (response.status === 201) {
+              const data = await response.json();
+              return `Conversation saved successfully! View it at: ${data.url || 'N/A'}`;
+            } else {
+              const errorText = await response.text();
+              throw new Error(`API request failed: ${response.status} - ${errorText}`);
+            }
+          },
+        };
+
+        try {
+          if (!TOOLS[toolName]) {
+            throw new Error(`Unknown tool: ${toolName}`);
+          }
+
+          const resultText = await TOOLS[toolName](toolArgs);
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: { content: [{ type: 'text', text: resultText }] },
+          });
+        } catch (err) {
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            error: { code: -32602, message: err.message },
+          });
+        }
 
       default:
-        res.status(400).json({
+        return res.json({
           jsonrpc: '2.0',
-          id: id,
-          error: {
-            code: -32601,
-            message: `Method not found: ${method}`,
-          },
+          id,
+          error: { code: -32601, message: `Method not found: ${method}` },
         });
     }
   } catch (error) {
     console.error('Error processing request:', error);
-    res.status(500).json({
+    return res.status(500).json({
       jsonrpc: '2.0',
       id: id || null,
-      error: {
-        code: -32603,
-        message: error.message,
-      },
+      error: { code: -32603, message: error.message },
     });
   }
 });
 
-// Health check endpoint
+// Health check
 app.get('/mcp/health', (req, res) => {
   res.json({
     status: 'healthy',
@@ -202,7 +160,7 @@ app.get('/mcp/health', (req, res) => {
   });
 });
 
-// Handle GET requests to /mcp (for debugging)
+// Debug route
 app.get('/mcp', (req, res) => {
   res.json({
     message: 'MCP Server is running',
@@ -211,7 +169,7 @@ app.get('/mcp', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`▶ Remote MCP Server listening on http://0.0.0.0:${PORT}`);
-  console.log(`▶ Health check: http://0.0.0.0:${PORT}/health`);
+  console.log(`▶ MCP Server listening on http://0.0.0.0:${PORT}`);
+  console.log(`▶ Health check: http://0.0.0.0:${PORT}/mcp/health`);
   console.log(`▶ MCP endpoint: http://0.0.0.0:${PORT}/mcp`);
 });
