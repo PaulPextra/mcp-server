@@ -9,7 +9,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 8000;
-const SERVER_BASE_URL = process.env.BASE_URL;
+const SERVER_BASE_URL = process.env.SERVER_BASE_URL || 'https://10.0.1.35:3000';
 
 if (!SERVER_BASE_URL) {
   console.error('BASE_URL is not set in environment variables.');
