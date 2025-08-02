@@ -9,7 +9,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 8000;
-const SERVER_BASE_URL = process.env.SERVER_BASE_URL || 'http://10.0.1.35:3000';
+// const SERVER_BASE_URL = process.env.SERVER_BASE_URL || 'http://10.0.1.35:3000';
 
 if (!SERVER_BASE_URL) {
   console.error('BASE_URL is not set in environment variables.');
@@ -100,7 +100,7 @@ app.post('/mcp', async (req, res) => {
             formData.append('model', 'Claude (MCP)');
             formData.append('skipScraping', '');
 
-            const response = await fetch(`${SERVER_BASE_URL}/api/conversation`, {
+            const response = await fetch(`http://10.0.1.35:3000/api/conversation`, {
               method: 'POST',
               body: formData,
             });
